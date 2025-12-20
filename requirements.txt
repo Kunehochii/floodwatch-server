@@ -1,0 +1,14 @@
+# FloodWatch Backend Dependencies
+# ================================
+# Python 3.9+ required
+
+# Web Framework
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+
+# Computer Vision
+opencv-python>=4.8.0
+numpy>=1.24.0
+
+# Optional: For development
+python-multipart>=0.0.6
