@@ -17,6 +17,15 @@ import json
 from pathlib import Path
 from typing import Generator
 import logging
+import threading
+import time
+
+# Raspberry Pi GPIO support (graceful fallback for development on non-Pi systems)
+try:
+    import RPi.GPIO as GPIO
+    RPI_AVAILABLE = True
+except ImportError:
+    RPI_AVAILABLE = False
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -41,9 +50,20 @@ app.add_middleware(
 CONFIG_FILE = Path(__file__).parent / "calibration.json"
 PIXEL_THRESHOLD = 300  # Minimum pixels to consider a color "present"
 
+# Buzzer Configuration (GPIO4 = Pin 7 on Raspberry Pi 3B+)
+BUZZER_PIN = 4  # GPIO4
+BUZZER_INTERVALS = {
+    0: None,   # Level 0 (Normal): No beeping
+    1: 2.0,    # Level 1 (Warning): Very slow beeping (2 seconds interval)
+    2: 1.0,    # Level 2 (Critical): Medium beeping (1 second interval)
+    3: 0.3,    # Level 3 (Flood): Fast beeping (0.3 seconds interval)
+}
+
 # Global State
 current_status = {"level": 0, "message": "Initializing", "presence": {}}
 calibration_config = {}
+buzzer_thread = None
+buzzer_running = False
 
 
 def load_calibration() -> dict:
@@ -67,6 +87,89 @@ def load_calibration() -> dict:
         logger.info(f"Loaded calibration from {CONFIG_FILE}")
     
     return calibration_config
+
+
+def setup_buzzer():
+    """
+    Initialize GPIO for the active buzzer.
+    Only runs on Raspberry Pi systems with RPi.GPIO available.
+    """
+    if not RPI_AVAILABLE:
+        logger.warning("RPi.GPIO not available - buzzer disabled (running on non-Pi system)")
+        return False
+    
+    try:
+        GPIO.setmode(GPIO.BCM)
+        GPIO.setup(BUZZER_PIN, GPIO.OUT)
+        GPIO.output(BUZZER_PIN, GPIO.LOW)  # Ensure buzzer is off initially
+        logger.info(f"Buzzer initialized on GPIO{BUZZER_PIN}")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to initialize buzzer: {e}")
+        return False
+
+
+def buzzer_control_loop():
+    """
+    Background thread that controls buzzer beeping based on current flood level.
+    Beep rate increases with flood severity.
+    """
+    global buzzer_running
+    
+    if not RPI_AVAILABLE:
+        return
+    
+    buzzer_running = True
+    logger.info("Buzzer control loop started")
+    
+    try:
+        while buzzer_running:
+            level = current_status.get("level", 0)
+            interval = BUZZER_INTERVALS.get(level)
+            
+            if interval is None:
+                # Level 0: No beeping, keep buzzer off
+                GPIO.output(BUZZER_PIN, GPIO.LOW)
+                time.sleep(0.1)  # Small sleep to prevent busy loop
+            else:
+                # Beep pattern: ON for 100ms, OFF for (interval - 100ms)
+                GPIO.output(BUZZER_PIN, GPIO.HIGH)
+                time.sleep(0.1)  # Beep duration
+                GPIO.output(BUZZER_PIN, GPIO.LOW)
+                time.sleep(max(0.1, interval - 0.1))  # Wait before next beep
+    except Exception as e:
+        logger.error(f"Buzzer control loop error: {e}")
+    finally:
+        if RPI_AVAILABLE:
+            GPIO.output(BUZZER_PIN, GPIO.LOW)
+        logger.info("Buzzer control loop stopped")
+
+
+def start_buzzer_thread():
+    """Start the buzzer control background thread."""
+    global buzzer_thread
+    
+    if not RPI_AVAILABLE:
+        return
+    
+    buzzer_thread = threading.Thread(target=buzzer_control_loop, daemon=True)
+    buzzer_thread.start()
+    logger.info("Buzzer thread started")
+
+
+def stop_buzzer():
+    """Stop the buzzer and cleanup GPIO."""
+    global buzzer_running
+    
+    buzzer_running = False
+    
+    if RPI_AVAILABLE:
+        try:
+            GPIO.output(BUZZER_PIN, GPIO.LOW)
+            GPIO.cleanup(BUZZER_PIN)
+            logger.info("Buzzer stopped and GPIO cleaned up")
+        except Exception as e:
+            logger.error(f"Error during buzzer cleanup: {e}")
 
 
 def detect_water_level(frame: np.ndarray) -> tuple[int, str, dict]:
@@ -170,8 +273,16 @@ def generate_frames() -> Generator[bytes, None, None]:
 
 @app.on_event("startup")
 async def startup_event():
-    """Load calibration on server startup."""
+    """Load calibration and initialize buzzer on server startup."""
     load_calibration()
+    if setup_buzzer():
+        start_buzzer_thread()
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Cleanup buzzer GPIO on server shutdown."""
+    stop_buzzer()
 
 
 @app.get("/", tags=["Health"])
