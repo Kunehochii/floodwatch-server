@@ -64,7 +64,7 @@ current_status = {"level": 0, "message": "Initializing", "presence": {}}
 calibration_config = {}
 buzzer_thread = None
 buzzer_running = False
-buzzer_enabled = True  # Toggle state for buzzer alerts
+buzzer_enabled = False  # Toggle state for buzzer alerts (default: disabled)
 
 
 def load_calibration() -> dict:
