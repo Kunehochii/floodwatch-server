@@ -102,7 +102,7 @@ def setup_buzzer():
     try:
         GPIO.setmode(GPIO.BCM)
         GPIO.setup(BUZZER_PIN, GPIO.OUT)
-        GPIO.output(BUZZER_PIN, GPIO.LOW)  # Ensure buzzer is off initially
+        GPIO.output(BUZZER_PIN, GPIO.HIGH)  # Ensure buzzer is off initially (active buzzer)
         logger.info(f"Buzzer initialized on GPIO{BUZZER_PIN}")
         return True
     except Exception as e:
@@ -127,7 +127,7 @@ def buzzer_control_loop():
         while buzzer_running:
             # Check if buzzer is enabled
             if not buzzer_enabled:
-                GPIO.output(BUZZER_PIN, GPIO.LOW)
+                GPIO.output(BUZZER_PIN, GPIO.HIGH)  # OFF for active buzzer
                 time.sleep(0.1)
                 continue
             
@@ -136,19 +136,19 @@ def buzzer_control_loop():
             
             if interval is None:
                 # Level 0-1: No beeping, keep buzzer off
-                GPIO.output(BUZZER_PIN, GPIO.LOW)
+                GPIO.output(BUZZER_PIN, GPIO.HIGH)  # OFF for active buzzer
                 time.sleep(0.1)  # Small sleep to prevent busy loop
             else:
-                # Beep pattern: ON for 100ms, OFF for (interval - 100ms)
-                GPIO.output(BUZZER_PIN, GPIO.HIGH)
+                # Beep pattern: LOW to beep for 100ms, HIGH to silence
+                GPIO.output(BUZZER_PIN, GPIO.LOW)  # ON for active buzzer (beep)
                 time.sleep(0.1)  # Beep duration
-                GPIO.output(BUZZER_PIN, GPIO.LOW)
+                GPIO.output(BUZZER_PIN, GPIO.HIGH)  # OFF for active buzzer (silence)
                 time.sleep(max(0.1, interval - 0.1))  # Wait before next beep
     except Exception as e:
         logger.error(f"Buzzer control loop error: {e}")
     finally:
         if RPI_AVAILABLE:
-            GPIO.output(BUZZER_PIN, GPIO.LOW)
+            GPIO.output(BUZZER_PIN, GPIO.HIGH)  # OFF for active buzzer
         logger.info("Buzzer control loop stopped")
 
 
@@ -172,7 +172,7 @@ def stop_buzzer():
     
     if RPI_AVAILABLE:
         try:
-            GPIO.output(BUZZER_PIN, GPIO.LOW)
+            GPIO.output(BUZZER_PIN, GPIO.HIGH)  # OFF for active buzzer
             GPIO.cleanup(BUZZER_PIN)
             logger.info("Buzzer stopped and GPIO cleaned up")
         except Exception as e:
