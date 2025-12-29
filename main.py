@@ -54,9 +54,9 @@ PIXEL_THRESHOLD = 300  # Minimum pixels to consider a color "present"
 BUZZER_PIN = 4  # GPIO4
 BUZZER_INTERVALS = {
     0: None,   # Level 0 (Normal): No beeping
-    1: 2.0,    # Level 1 (Warning): Very slow beeping (2 seconds interval)
-    2: 1.0,    # Level 2 (Critical): Medium beeping (1 second interval)
-    3: 0.3,    # Level 3 (Flood): Fast beeping (0.3 seconds interval)
+    1: None,   # Level 1 (Yellow/Warning): No beeping
+    2: 2.0,    # Level 2 (Orange/Critical): Beep every 2 seconds
+    3: 0.8,    # Level 3 (Red/Flood): Continuous beeping every 0.8 seconds
 }
 
 # Global State
@@ -64,6 +64,7 @@ current_status = {"level": 0, "message": "Initializing", "presence": {}}
 calibration_config = {}
 buzzer_thread = None
 buzzer_running = False
+buzzer_enabled = True  # Toggle state for buzzer alerts
 
 
 def load_calibration() -> dict:
@@ -112,7 +113,7 @@ def setup_buzzer():
 def buzzer_control_loop():
     """
     Background thread that controls buzzer beeping based on current flood level.
-    Beep rate increases with flood severity.
+    Beep rate increases with flood severity. Can be toggled on/off via API.
     """
     global buzzer_running
     
@@ -124,11 +125,17 @@ def buzzer_control_loop():
     
     try:
         while buzzer_running:
+            # Check if buzzer is enabled
+            if not buzzer_enabled:
+                GPIO.output(BUZZER_PIN, GPIO.LOW)
+                time.sleep(0.1)
+                continue
+            
             level = current_status.get("level", 0)
             interval = BUZZER_INTERVALS.get(level)
             
             if interval is None:
-                # Level 0: No beeping, keep buzzer off
+                # Level 0-1: No beeping, keep buzzer off
                 GPIO.output(BUZZER_PIN, GPIO.LOW)
                 time.sleep(0.1)  # Small sleep to prevent busy loop
             else:
@@ -340,6 +347,38 @@ def reload_calibration():
     return JSONResponse(content={
         "status": "reloaded",
         "config": config
+    })
+
+
+@app.get("/buzzer", tags=["Buzzer"])
+def get_buzzer_status():
+    """
+    Get current buzzer enabled/disabled status.
+    
+    Returns:
+        JSON object with:
+        - enabled (bool): Whether the buzzer alerts are enabled
+    """
+    return JSONResponse(content={"enabled": buzzer_enabled})
+
+
+@app.post("/buzzer/toggle", tags=["Buzzer"])
+def toggle_buzzer():
+    """
+    Toggle buzzer alerts on/off.
+    
+    Returns:
+        JSON object with:
+        - enabled (bool): New buzzer enabled state after toggle
+        - message (str): Status message
+    """
+    global buzzer_enabled
+    buzzer_enabled = not buzzer_enabled
+    state = "enabled" if buzzer_enabled else "disabled"
+    logger.info(f"Buzzer alerts {state}")
+    return JSONResponse(content={
+        "enabled": buzzer_enabled,
+        "message": f"Buzzer alerts {state}"
     })
 
 
